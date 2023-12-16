@@ -1,0 +1,283 @@
+---
+title: 'Homes Impacted by Texas Blackouts in February of 2021'
+author: "{Kristina Glass}"
+date: "2022-12-15"
+output:
+    html_document:
+      print_df: paged
+      toc: yes
+      toc_depth: 4
+      toc_float: yes
+---
+
+# Introduction
+
+"In February 2021, the state of Texas suffered a major power crisis, which came about as a result of three severe winter storms sweeping across the United States on February 10--11, 13--17, and 15--20."[^1] This blackout was caused to the several failures in the Texas power grid which was not optimized to deal with harsh winter weather. At peak, over 5 million people were without power, at least 246 people were killed from the resulting outage and storm, but estimates are as high as 702. Total cost of damages were estimated to be at least \$195 billion[1](<https://en.wikipedia.org/wiki/2021_Texas_power_crisis>)
+
+[^1]: Wikipedia. 2021. "2021 Texas power crisis." Last modified October 2, 2021. <https://en.wikipedia.org/wiki/2021_Texas_power_crisis>.
+
+## Area of Study
+
+Houston is the most populous city in Texas and the 4th most populous city in the United States. It is home to over 2 million residents where an estimated 42.3% of people are homeowners. As of 2019, 20.1% of Houstonians lived at or below the poverty line[1](<https://en.wikipedia.org/wiki/Houston>)
+
+# Purpose and Method of Study
+
+The purpose of this study is to estimate the number of homes in Houston that lost power as a result of the first two storms and investigate socioeconomic factors that could impact a communities ability to recover from a power outage.
+
+This analysis will be based on remotely-sensed night lights data, acquired from the [Visible Infrared Imaging Radiometer Suite (VIIRS)](https://en.wikipedia.org/wiki/Visible_Infrared_Imaging_Radiometer_Suite) onboard the Suomi satellite.
+
+The number of homes that lost power will be determined by joining the associated spatial data with [OpenStreetMap](https://www.openstreetmap.org/#map=4/38.01/-95.84) data on buildings and roads.
+
+Socioeconomic factors will be analysis using data from the US Census Bureau
+
+To investigate potential socioeconomic factors that influenced recovery, you will link your analysis with data from the US Census Bureau.
+
+# Data
+
+#### Night lights
+
+NASA's Worldview will be used to explore the data around the day of the storm. There are several days with too much cloud cover to be useful, but 2021-02-07 and 2021-02-16 provide two clear, contrasting images to visualize the extent of the power outage in Texas.
+
+VIIRS data is distributed through NASA's [Level-1 and Atmospheric Archive & Distribution System Distributed Active Archive Center (LAADS DAAC)](https://ladsweb.modaps.eosdis.nasa.gov/). Many NASA Earth data products are distributed in 10x10 degree tiles in sinusoidal equal-area projection. Tiles are identified by their horizontal and vertical position in the grid. Houston lies on the border of tiles h08v05 and h08v06. We therefore need to download two tiles per date.
+
+These files are as follows:
+
+-   `VNP46A1.A2021038.h08v05.001.2021039064328.h5.tif`: tile h08v05, collected on 2021-02-07
+-   `VNP46A1.A2021038.h08v06.001.2021039064329.h5.tif`: tile h08v06, collected on 2021-02-07
+-   `VNP46A1.A2021047.h08v05.001.2021048091106.h5.tif`: tile h08v05, collected on 2021-02-16
+-   `VNP46A1.A2021047.h08v06.001.2021048091105.h5.tif`: tile h08v06, collected on 2021-02-16
+
+#### Roads
+
+Typically highways account for a large portion of the night lights observable from space (see Google's [Earth at Night](https://earth.google.com/web/@27.44405464,-84.7693044,206.63660162a,8916361.52264659d,35y,0h,0t,0r/data=CiQSIhIgMGY3ZTJkYzdlOGExMTFlNjk5MGQ2ZjgxOGQ2OWE2ZTc)). To minimize falsely identifying areas with reduced traffic as areas without power, areas near highways will be ignored.
+
+[OpenStreetMap (OSM)](https://planet.openstreetmap.org/) is a collaborative project which creates publicly available geographic data of the world. Ingesting this data into a database where it can be subsetted and processed is a large undertaking. Fortunately, third party companies redistribute OSM data. [Geofabrik's download sites](https://download.geofabrik.de/) was used to retrieve a shapefile of all highways in Texas and prepared a Geopackage (`.gpkg` file) containing just the subset of roads that intersect the Houston metropolitan area. 
+
+-   `gis_osm_roads_free_1.gpkg`
+
+#### Houses
+
+Building data can also be obtained from OpenStreetMap, downloaded from Geofabrick and prepared a GeoPackage containing only houses in the Houston metropolitan area.
+
+-   `gis_osm_buildings_a_free_1.gpkg`
+
+#### Socioeconomic
+
+[U.S. Census Bureau's American Community Survey](https://www.census.gov/programs-surveys/acs) was used for census tracts in 2019. The *folder* `ACS_2019_5YR_TRACT_48.gdb` is an ArcGIS ["file geodatabase"](https://desktop.arcgis.com/en/arcmap/latest/manage-data/administer-file-gdbs/file-geodatabases.htm), a multi-file proprietary format that's roughly analogous to a GeoPackage file.
+
+# Workflow
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+#load in necessary libraries
+library(tidyverse)
+library(sf)
+library(stars)
+library(raster)
+library(ggplot2)
+library(dbplyr)
+library(RSQLite)
+library(terra)
+library(dplyr)
+library(tmap)
+```
+
+```{r}
+#load in night lights data using stars
+
+nightlights07_1 <- read_stars('data/VNP46A1/VNP46A1.A2021038.h08v05.001.2021039064328.tif')
+nightlights07_2 <- read_stars('data/VNP46A1/VNP46A1.A2021038.h08v06.001.2021039064329.tif')
+nightlights16_1 <- read_stars('data/VNP46A1/VNP46A1.A2021047.h08v05.001.2021048091106.tif')
+nightlights16_2 <- read_stars('data/VNP46A1/VNP46A1.A2021047.h08v06.001.2021048091105.tif')
+```
+
+## Find Location of Blackouts and Create Mask
+
+```{r}
+#combine nightlights datasets by date into individual tiles
+nightlights07 <- st_mosaic(nightlights07_1, nightlights07_2) 
+nightlights16 <- st_mosaic(nightlights16_1, nightlights16_2)
+
+#view output of tile combination
+#plot(nightlights07)
+#plot(nightlights16)
+```
+
+```{r}
+#find difference in night light intensity by subtracting the 7th from the 16th
+intensity_change <- nightlights07 - nightlights16
+#check difference plot
+#plot(intensity_change)
+#reclass the difference raster from 200 nW cm-2sr-1
+intensity_reclass <- cut(intensity_change,c(-Inf,200,Inf))
+#remove NA's from the difference raster
+intensity_change[intensity_change <= 200] = NA
+#plot the intensity change
+#plot(intensity_change)
+#plot the reclass
+#plot(intensity_reclass)
+```
+
+## Create Vector of Blackout Mask Mapped to Area of Interest
+
+The mask created above is vectorized to be turned into a shapefile. This is necessary in order to be able to use the data to effectively complete the analysis. `st_make_valid()` is used to fix any objects within the converted dataset that may have been manipulated in incorrect ways.
+
+Following this, a bounding box is created to plot the vectorized dataset onto the Houston area
+
+```{r}
+#create a vector of the blackout mask with the dropped values
+intensity_vector <- st_as_sf(intensity_change)
+#plot vectorized mask
+#plot(intensity_vector)
+```
+
+```{r}
+#fix any invalid geometries in vector
+intensity_valid <- st_make_valid(intensity_vector)
+#plot valid vector
+#plot(intensity_valid)
+```
+
+```{r}
+#create houston bounding box from given coordinates
+h_bbox <- matrix(c(-96.5,29,-96.5,30.5,-94.5,30.5,-94.5,29,-96.5,29), ncol = 2, byrow = TRUE)
+#turning houston bounding box into a polygon
+h_poly <- st_polygon(list(h_bbox)) %>% 
+  st_sfc(crs = 4326)
+#create houston polygon in correct crs
+h_poly_3083 <- st_polygon(list(h_bbox)) %>% 
+  st_sfc(crs = 3083)
+#spatially subset using st_crop to houston
+h_crop <- st_crop(intensity_valid, h_poly) %>% 
+  st_transform(3083) #transform and reproject crs onto EPSG:3083
+#Plot cropped Houston subset
+#plot(h_crop, join_zlim = TRUE, main = "Houston Blackout")
+#check bounding box
+#plot(h_poly_3083)
+```
+
+## Remove Highways from Mask
+
+As mentioned previously, highways are removed from the dataset to minimize the chance of falsely attributing areas with reduced traffic as areas experiencing a blackout
+
+```{r, warning=FALSE, message=FALSE}
+# use SQL query to read in highways dataset. Requires packages "RSQLITE" and "dbplyer
+query = "SELECT * FROM gis_osm_roads_free_1 WHERE fclass='motorway'"
+#use st_read and query output to load highways data
+highways <- st_read("data/gis_osm_roads_free_1.gpkg", query = query)
+# reproject highwats dataset to same crs as h_crop - EPSG:308 from WGS84
+highways <- st_transform(highways, 3083)
+#check highways crs
+#crs(highways)
+#create buffer of areas within 200m of highways
+highway_buffer <- st_union(st_buffer(highways, dist = 200))
+#plot buffer
+#plot(highway_buffer)
+# find areas that experienced blackouts futher than 200m away
+over200_buffer <-  st_difference(h_crop, highway_buffer)
+#plot 200m away blackout zones
+#plot(over200_buffer)
+```
+
+## Find Homes Impacted by Blackout Area
+
+```{r, warning=FALSE, message=FALSE}
+#use SQL query to read in residential buildings only
+query2 = "SELECT * FROM gis_osm_buildings_a_free_1 WHERE (type IS NULL AND name IS NULL) OR type in ('residential', 'apartments', 'house', 'static_caravan', 'detached')"
+#use st_read to read in residential buildings using SQL query
+buildings <- st_read("data/gis_osm_buildings_a_free_1.gpkg", query = query2)
+# transform buildings crs
+buildings <- st_transform(buildings, 3083)
+#check buildings crs
+#st_crs(buildings)
+```
+
+```{r}
+#filter to homes within blackout areas using the previous buffer and buildings data
+blackout_homes <- st_filter(over200_buffer, buildings)
+#check rows of new dataframe
+#nrow(blackout_homes)
+#plot datafra,e
+#plot(blackout_homes)
+
+```
+
+## Explore Socioeconomic Factors
+
+```{r, warning=FALSE, message=FALSE}
+#us est_read to read in texas census, reproject into 3083 crs
+texas_acs <- st_read(dsn = "data/ACS_2019_5YR_TRACT_48_TEXAS.gdb", layer = "ACS_2019_5YR_TRACT_48_TEXAS") %>% 
+  st_transform(3083)
+# read in income data from texas geodatabase
+income <- st_read(dsn = "data/ACS_2019_5YR_TRACT_48_TEXAS.gdb", layer = "X19_INCOME") %>% 
+  dplyr::select("B19013e1", "GEOID") #select median income and GEOID column
+#rename GEOID column to GEOID_Data to match texas_acs
+colnames(income)[colnames(income) == "GEOID"] = "GEOID_Data"
+```
+
+```{r}
+#joining income data and census geometries
+income_census <- left_join(texas_acs, income)
+#joining census tracts with impacted buildings
+census_blackouts <- st_join(income_census, blackout_homes)
+#filter to census tracts containing blackouts
+census_filter <- st_filter(income_census, blackout_homes)
+```
+
+```{r}
+# map of median income by census tracts with blackouts
+median_income <- tm_shape(census_filter) +
+  tm_polygons('B19013e1', palette = 'viridis', title = 'Median Income') +
+  tm_layout(legend.outside = TRUE, legend.outside.position = c('right', 'bottom'), main.title = "Map of Census Tracts Experiencing Blackouts by Median Income in Houston", main.title.size = 40) + tm_graticules() + tm_compass(position = c('left', 'TOP')) + tm_scale_bar()
+median_income
+
+```
+
+### Find Census Tracts Impacted by Blackout Areas
+
+```{r}
+#find areas unimpacted by blackouts
+unimpacted <- income_census %>% 
+  filter(!GEOID_Data %in% census_filter$GEOID_Data)
+#tfind areas impacted by blackouts
+impacted <- census_filter %>% 
+  filter(GEOID_Data %in% income_census$GEOID_Data)
+
+#plot histogram of unimpacted blackout areas
+unimpacted_histo <- ggplot(unimpacted) +
+  geom_histogram(aes(x = B19013e1), color = "seagreen", fill = "darkgreen") +
+  labs(title = "Distribution of Income in Areas Unimpacted by Blackouts", x = "Income")
+#plot histogram of impacted areas
+impacted_histo <- ggplot(impacted) +
+  geom_histogram(aes(x = B19013e1), color = "palevioletred", fill = "indianred3") +
+  labs(title = "Distribution of Income in Areas Impacted by Blackouts", x = "Income")
+unimpacted_histo
+impacted_histo
+```
+
+## Summary of Results
+
+The results show that census tracts with a lower median income, between 0 - 100,000 experienced higher rates of blackouts compared to tracts with a median income above 100,000. However, the areas unimpacted by blackouts shows a similar trend, where census tracts with an income level between 0 - 100,000 were unimpacted by blackouts at higher rates than those impacted. While socioeconomic factors could contribute to a communities ability to recover from blackouts, due to access to personal sources of energy generation such as a generator or greater access to other heat sources, this study cannot show that these factors cannot exclusively determine a communities resiliency. Examining other factors such as the type of energy sources that supply Houston and if any of those energy plants have wintering technology in their systems would be a better indicator for a communities resiliency to a blackout.
+
+# References
+
+*ArcMap*. What is a file geodatabase?-ArcMap \| Documentation. (n.d.). <https://desktop.arcgis.com/en/arcmap/latest/manage-data/administer-file-gdbs/file-geodatabases.htm>
+
+Bureau, U. C. (2023, November 30). *American Community Survey (ACS)*. Census.gov. <https://www.census.gov/programs-surveys/acs>
+
+*Geofabrik Download server*. Geofabrik Download Server. (n.d.). <https://download.geofabrik.de/>
+
+Google. (n.d.). *Google Earth Engine*. Google earth. <https://earth.google.com/web/data=MkEKPwo9CiExMzY2MmI4dER6am1uT1I3RFFnUUxaSlJPbDl5SFF2X3YSFgoUMDAwNjEzMUVFNjJCOTgwOUJCQkQgAQ>
+
+NASA. (n.d.). *Level-1 and Atmosphere Archive & Distribution System Distributed Active Archive Center - LAADS DAAC*. NASA. <https://ladsweb.modaps.eosdis.nasa.gov/>
+
+OpenStreetMap. (n.d.). <https://www.openstreetmap.org/#map=4/38.01/-95.84>
+
+Wikimedia Foundation. (2023a, August 12). *Visible Infrared Imaging Radiometer Suite*. Wikipedia. <https://en.wikipedia.org/wiki/Visible_Infrared_Imaging_Radiometer_Suite>
+
+Wikimedia Foundation. (2023b, November 10). *2021 Texas Power Crisis*. Wikipedia. <https://en.wikipedia.org/wiki/2021_Texas_power_crisis>
+
+Wikimedia Foundation. (2023c, December 14). *Houston*. Wikipedia. <https://en.wikipedia.org/wiki/Houston>
