@@ -16,11 +16,19 @@ The purpose of this study is to estimate the number of homes in Houston that los
 
 # References
 ArcMap. What is a file geodatabase?-ArcMap | Documentation. (n.d.). https://desktop.arcgis.com/en/arcmap/latest/manage-data/administer-file-gdbs/file-geodatabases.htm 
+
 Bureau, U. C. (2023, November 30). American Community Survey (ACS). Census.gov. https://www.census.gov/programs-surveys/acs 
+
 Geofabrik Download server. Geofabrik Download Server. (n.d.). https://download.geofabrik.de/ 
+
 Google. (n.d.). Google Earth Engine. Google earth. https://earth.google.com/web/data=MkEKPwo9CiExMzY2MmI4dER6am1uT1I3RFFnUUxaSlJPbDl5SFF2X3YSFgoUMDAwNjEzMUVFNjJCOTgwOUJCQkQgAQ 
-NASA. (n.d.). Level-1 and Atmosphere Archive &amp; Distribution System Distributed Active Archive Center - LAADS DAAC. NASA. https://ladsweb.modaps.eosdis.nasa.gov/ 
+
+NASA. (n.d.). Level-1 and Atmosphere Archive & Distribution System Distributed Active Archive Center - LAADS DAAC. NASA. https://ladsweb.modaps.eosdis.nasa.gov/ 
+
 OpenStreetMap. (n.d.). https://www.openstreetmap.org/#map=4/38.01/-95.84 
+
 Wikimedia Foundation. (2023a, August 12). Visible Infrared Imaging Radiometer Suite. Wikipedia. https://en.wikipedia.org/wiki/Visible_Infrared_Imaging_Radiometer_Suite 
+
 Wikimedia Foundation. (2023b, November 10). 2021 Texas Power Crisis. Wikipedia. https://en.wikipedia.org/wiki/2021_Texas_power_crisis 
+
 Wikimedia Foundation. (2023c, December 14). Houston. Wikipedia. https://en.wikipedia.org/wiki/Houston 
